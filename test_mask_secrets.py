@@ -267,6 +267,11 @@ class BypassRegressionTests(unittest.TestCase):
         self.assertIsNone(self.invoke("Grep", {"pattern": "Main", "path": ".", "output_mode": "content", "glob": "*.java"}))
         self.assertIsNone(self.invoke("Grep", {"pattern": "Main", "path": ".", "output_mode": "content", "type": "java"}))
 
+    def test_hash_does_not_hide_later_commands(self):
+        for command in ("echo a#b && cat .env", "echo ok # note\ncat .env", "echo x #c; cat .env", "cat .env # tail"):
+            self.blocked(self.bash(command), command)
+        self.assertIsNone(self.bash("echo '# cat .env is only text' > /dev/null"))
+
     def test_search_that_cannot_finish_is_denied(self):
         with mock.patch.object(policy, "WALK_MAX_ENTRIES", 0):
             message = policy.search_exposure("recursive grep", [str(self.root)], [], [], False, str(self.root), policy.Budget())

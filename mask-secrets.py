@@ -191,6 +191,9 @@ def tokenize(cmd: str) -> list[str]:
     try:
         lex = shlex.shlex(cmd, posix=True, punctuation_chars=True)
         lex.whitespace_split = True
+        # shlex would drop everything after a `#` (even mid-word, and after the newlines turned into
+        # `;` above), but bash only starts a comment at the beginning of a word. Never skip text.
+        lex.commenters = ""
         return list(lex)
     except ValueError:
         return cmd.split()
