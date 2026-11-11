@@ -70,3 +70,15 @@ Codex hook definitions must be trusted; review new/changed definitions with `/ho
 Backups of earlier versions are under `backups/`.
 
 Official Codex hook contract: https://learn.chatgpt.com/docs/hooks
+
+## Tests and benchmark
+
+```bash
+python3 -m unittest            # policy tests
+python3 bench_mask_secrets.py  # latency per hook call (min/median/p95/max)
+python3 bench_mask_secrets.py --huge --check   # also a 65k-file tree; exit 1 if a p95 is over budget
+```
+
+The hook is a fresh process before every tool call, so the benchmark spawns it like the agents
+do and compares against a bare `python -I -c pass` floor. Options: `-n RUNS`, `--files N`,
+`--json`. Budgets are loose (0.5 s normal, 3.5 s for tree walks; the agents kill the hook at 5 s).
