@@ -22,6 +22,7 @@ from pathlib import Path
 
 HOOK_SCRIPT = Path(__file__).resolve().with_name("mask-secrets.py")
 MARKER = "mask-secrets.py"
+PYTHON = "python" if os.name == "nt" else "python3"  # Windows installs ship python, not python3
 EVENT = "PreToolUse"
 
 AGENTS = {
@@ -51,7 +52,7 @@ def hook_entry(agent):
         "hooks": [
             {
                 "type": "command",
-                "command": f'python3 -I "{HOOK_SCRIPT}"',
+                "command": f'{PYTHON} -I "{HOOK_SCRIPT}"',
                 "timeout": 5,
                 "statusMessage": "Masking secrets...",
             }

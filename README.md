@@ -13,16 +13,26 @@ dotenv values and properties continuation lines are handled.
 
 ## Install
 
+One line (clones to `~/.local/share/ai-hooks`, or updates it, then registers the hook):
+
 ```bash
-git clone https://github.com/WindyWin/ai-hooks ~/.local/share/ai-hooks
-python3 ~/.local/share/ai-hooks/install.py
+# Linux / macOS
+curl -fsSL https://raw.githubusercontent.com/WindyWin/ai-hooks/main/install.sh | sh
+```
+```powershell
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/WindyWin/ai-hooks/main/install.ps1 | iex
 ```
 
-`install.py` registers the hook for Claude (`~/.claude/settings.json`) and Codex
+Or from a checkout: `./install.sh`, `.\install.ps1` or `python3 install.py`. Pass flags
+after `sh -s --` when piping, e.g. `curl ... | sh -s -- --codex`.
+
+The installer registers the hook for Claude (`~/.claude/settings.json`) and Codex
 (`~/.codex/hooks.json`, plus `features.hooks = true` in `config.toml`). It only touches
 agents whose config dir exists, backs up each file it changes, keeps your other hooks, and is
-safe to re-run. Options: `--claude`, `--codex`, `--dry-run`, `--uninstall`. Restart running
-sessions afterwards; Codex may ask you to trust the new hook (`/hooks`).
+safe to re-run. Options: `--claude`, `--codex`, `--dry-run`, `--uninstall`. Set `AI_HOOKS_DIR`
+to clone somewhere else. Restart running sessions afterwards; Codex may ask you to trust the
+new hook (`/hooks`).
 
 ## What it covers
 
