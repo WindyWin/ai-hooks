@@ -11,6 +11,19 @@ file is involved it returns a numbered preview with values replaced by `****`
 `.template`, `.dist`, and `.tpl` pass. Comments, keys, blank values, quoted multiline
 dotenv values and properties continuation lines are handled.
 
+## Install
+
+```bash
+git clone https://github.com/WindyWin/ai-hooks ~/.local/share/ai-hooks
+python3 ~/.local/share/ai-hooks/install.py
+```
+
+`install.py` registers the hook for Claude (`~/.claude/settings.json`) and Codex
+(`~/.codex/hooks.json`, plus `features.hooks = true` in `config.toml`). It only touches
+agents whose config dir exists, backs up each file it changes, keeps your other hooks, and is
+safe to re-run. Options: `--claude`, `--codex`, `--dry-run`, `--uninstall`. Restart running
+sessions afterwards; Codex may ask you to trust the new hook (`/hooks`).
+
 ## What it covers
 
 - Claude `Read` / `Grep` tools pointing at a secret file, also through a symlink.
