@@ -1,9 +1,15 @@
 # Shared secret masking hook
 
-Claude and Codex both run `python3 -I ~/.local/share/ai-hooks/mask-secrets.py`
-at PreToolUse. Edit this file to update the policy for both agents.
-The old Claude script (`~/.claude/hooks/mask-secrets.py`) is a compatibility entry
-point with no separate rules.
+Claude and Codex both run one PreToolUse hook that keeps `.env` / `.properties` values out of the
+conversation. There are two implementations of the same policy:
+
+- **Rust** (`rust/`, the default): a single static binary, about 1-7 ms per call, no runtime needed.
+- **Python** (`mask-secrets.py`): the original, kept as the fallback and as the reference the Rust
+  port is checked against (`compare_impls.py`). Needs `python3`.
+
+Edit the policy in both, or in neither: `compare_impls.py` fails when they disagree.
+The old Claude script (`~/.claude/hooks/mask-secrets.py`) is a compatibility entry point to the Python hook
+with no separate rules.
 
 The policy blocks reads of `.env`, `.env.*`, `*.env`, and `*.properties`. When one
 file is involved it returns a numbered preview with values replaced by `****`
@@ -13,7 +19,7 @@ dotenv values and properties continuation lines are handled.
 
 ## Install
 
-One line (clones to `~/.local/share/ai-hooks`, or updates it, then registers the hook):
+One line (clones to `~/.local/share/ai-hooks`, or updates it, installs the hook binary, registers it):
 
 ```bash
 # Linux / macOS
@@ -24,15 +30,31 @@ curl -fsSL https://raw.githubusercontent.com/WindyWin/ai-hooks/main/install.sh |
 irm https://raw.githubusercontent.com/WindyWin/ai-hooks/main/install.ps1 | iex
 ```
 
-Or from a checkout: `./install.sh`, `.\install.ps1` or `python3 install.py`. Pass flags
-after `sh -s --` when piping, e.g. `curl ... | sh -s -- --codex`.
+The script gets the Rust hook the first way that works: download the prebuilt binary from the latest
+GitHub release, else `cargo build --release`, else fall back to the Python script. The first two need
+no Python. From a checkout run `./install.sh` or `.\install.ps1`; pass flags after `sh -s --` when piping.
+`AI_HOOKS_IMPL=python` forces the Python hook, `AI_HOOKS_DIR` changes the clone location.
 
-The installer registers the hook for Claude (`~/.claude/settings.json`) and Codex
-(`~/.codex/hooks.json`, plus `features.hooks = true` in `config.toml`). It only touches
-agents whose config dir exists, backs up each file it changes, keeps your other hooks, and is
-safe to re-run. Options: `--claude`, `--codex`, `--dry-run`, `--uninstall`. Set `AI_HOOKS_DIR`
-to clone somewhere else. Restart running sessions afterwards; Codex may ask you to trust the
-new hook (`/hooks`).
+The binary registers itself, so you can also do it by hand:
+
+```bash
+cargo build --release --manifest-path rust/Cargo.toml
+rust/target/release/mask-secrets install            # --claude / --codex / --dry-run
+rust/target/release/mask-secrets uninstall
+```
+
+It edits Claude's `~/.claude/settings.json` and Codex's `~/.codex/hooks.json` (plus
+`features.hooks = true` in `config.toml`), only for agents whose config dir exists. It keeps your other
+hooks, key order and indentation, backs up each file it changes, and is safe to re-run (an existing
+entry is replaced in place, so switching from the Python hook to the binary is just re-running it).
+Restart running sessions afterwards; Codex may ask you to trust the new hook (`/hooks`).
+`python3 install.py` does the same for the Python hook.
+
+### Releasing the binaries
+
+Push a tag such as `v0.1.0`; `.github/workflows/release.yml` builds Linux (x86_64, aarch64, static musl),
+macOS (Apple Silicon, Intel) and Windows binaries and attaches them to a GitHub release together with
+`SHA256SUMS`. `install.sh` / `install.ps1` download `releases/latest/download/mask-secrets-<target>`.
 
 ## What it covers
 
@@ -74,11 +96,22 @@ Official Codex hook contract: https://learn.chatgpt.com/docs/hooks
 ## Tests and benchmark
 
 ```bash
-python3 -m unittest            # policy tests
-python3 bench_mask_secrets.py  # latency per hook call (min/median/p95/max)
-python3 bench_mask_secrets.py --huge --check   # also a 65k-file tree; exit 1 if a p95 is over budget
+cargo test --manifest-path rust/Cargo.toml          # Rust unit tests
+python3 -m unittest test_mask_secrets               # black-box tests against the Python hook
+HOOK_CMD=rust/target/release/mask-secrets python3 -m unittest test_mask_secrets   # same tests, Rust hook
+python3 compare_impls.py                            # Python vs Rust on ~25k payloads; exit 1 on any difference
+python3 bench_mask_secrets.py --cmd rust/target/release/mask-secrets --huge --check
 ```
 
-The hook is a fresh process before every tool call, so the benchmark spawns it like the agents
-do and compares against a bare `python -I -c pass` floor. Options: `-n RUNS`, `--files N`,
-`--json`. Budgets are loose (0.5 s normal, 3.5 s for tree walks; the agents kill the hook at 5 s).
+`compare_impls.py` runs templated commands (readers x file names x shell forms, git, recursive searches,
+the Read/Grep/MCP tools) plus random mutations of them through both implementations and reports any
+difference in decision or reason. The benchmark spawns the hook like the agents do and compares against a
+bare process-spawn floor; budgets are loose (0.5 s normal, 3.5 s for tree walks; the agents kill the hook
+at 5 s). Options: `-n RUNS`, `--files N`, `--json`, `--cmd COMMAND`.
+
+Typical latency per call on a 12-core Linux box: Rust 1.4-7 ms (19 ms for a 65k-file tree), Python 29-35 ms
+(80 ms for the same tree).
+
+Known difference from the Python hook: when a secret file is found but cannot be previewed (unreadable
+or non-UTF-8 path) the Rust hook still blocks, with a generic message, where Python stays silent. The
+Windows build is untested.

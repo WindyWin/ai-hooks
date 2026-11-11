@@ -1,0 +1,25 @@
+[package]
+name = "mask-secrets"
+version = "0.1.0"
+edition = "2024"
+description = "PreToolUse hook that keeps .env / .properties secret values out of Claude and Codex conversations"
+license = "MIT"
+
+[lib]
+name = "mask_secrets"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mask-secrets"
+path = "src/main.rs"
+
+[dependencies]
+regex = "1.13.1"
+serde = "1.0.229"
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

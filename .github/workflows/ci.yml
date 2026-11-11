@@ -1,0 +1,44 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  rust:
+    name: rust (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # The hook is developed and verified on Linux; macOS and Windows are checked for compile/unit tests.
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+
+  parity:
+    name: python vs rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release --manifest-path rust/Cargo.toml
+      - name: black-box tests against the Python hook
+        run: python3 -m unittest test_mask_secrets
+      - name: the same tests against the Rust hook
+        run: HOOK_CMD="$PWD/rust/target/release/mask-secrets" python3 -m unittest test_mask_secrets
+      - name: differential fuzz (python vs rust must agree)
+        run: python3 compare_impls.py --mutations 2000
+      - name: latency budgets
+        run: python3 bench_mask_secrets.py -n 10 --check --cmd "$PWD/rust/target/release/mask-secrets"

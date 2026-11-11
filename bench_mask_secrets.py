@@ -11,6 +11,7 @@ made the expected decision, and reports min/median/p95/max.
     python3 bench_mask_secrets.py --huge         # also build a tree past the walk cap (~60k entries)
     python3 bench_mask_secrets.py --check        # exit 1 if a p95 exceeds its budget (CI-friendly)
     python3 bench_mask_secrets.py --json         # machine-readable output
+    python3 bench_mask_secrets.py --cmd rust/target/release/mask-secrets   # benchmark another build
 
 Budgets are deliberately loose (shared CI boxes are noisy). The agents kill the hook after 5 s, so
 anything near that is a real problem; the tree-walk scenarios are capped by the hook's own
@@ -19,6 +20,8 @@ WALK_BUDGET_SECONDS. Not named test_*.py, so `unittest` discovery skips it.
 import argparse
 import json
 import os
+import shlex
+import shutil
 import statistics
 import subprocess
 import sys
@@ -27,7 +30,7 @@ import time
 from pathlib import Path
 
 SCRIPT = Path(__file__).with_name("mask-secrets.py")
-CMD = [sys.executable, "-I", str(SCRIPT)]
+CMD = [sys.executable, "-I", str(SCRIPT)]  # overridden by --cmd
 
 FAST_BUDGET = 0.5   # seconds, p95: ordinary calls (hook timeout in the agents is 5 s)
 WALK_BUDGET = 3.5   # seconds, p95: scenarios that walk a big tree (hook's own cap is 2 s + startup)
@@ -100,7 +103,11 @@ def main() -> int:
     ap.add_argument("--huge", action="store_true", help="also benchmark a ~65k-entry tree (slow to build)")
     ap.add_argument("--check", action="store_true", help="exit 1 if any p95 exceeds its budget")
     ap.add_argument("--json", action="store_true", help="print JSON instead of a table")
+    ap.add_argument("--cmd", help="hook command to benchmark instead of the Python script, e.g. the Rust binary")
     args = ap.parse_args()
+    if args.cmd:
+        global CMD
+        CMD = shlex.split(args.cmd)
 
     with tempfile.TemporaryDirectory(prefix="mask-secrets-bench-") as tmp:
         root, big, clean = Path(tmp) / "small", Path(tmp) / "big", Path(tmp) / "clean"
@@ -144,19 +151,26 @@ def main() -> int:
     floor_row = {"scenario": "floor  python -I -c pass", "min": min(floor), "median": statistics.median(floor),
                  "p95": pct(floor, 0.95), "max": max(floor), "budget": None, "over_budget": False}
     rows.insert(0, floor_row)
+    if shutil.which("true"):  # bare process spawn, for judging a compiled hook
+        spawn = []
+        for _ in range(args.runs):
+            t0 = time.perf_counter()
+            subprocess.run(["true"], check=True)
+            spawn.append(time.perf_counter() - t0)
+        rows.insert(1, {"scenario": "floor  true (bare spawn)", "min": min(spawn), "median": statistics.median(spawn),
+                        "p95": pct(spawn, 0.95), "max": max(spawn), "budget": None, "over_budget": False})
 
     if args.json:
         print(json.dumps({"runs": args.runs, "python": sys.version.split()[0], "results": rows}, indent=2))
     else:
-        print(f"mask-secrets.py latency, {args.runs} runs each, Python {sys.version.split()[0]}, "
-              f"{os.cpu_count()} CPUs (ms)\n")
+        print(f"hook latency: {' '.join(CMD)}\n{args.runs} runs each, {os.cpu_count()} CPUs (ms)\n")
         print(f"{'scenario':<42}{'min':>8}{'median':>8}{'p95':>8}{'max':>8}{'budget':>8}")
         for r in rows:
             budget = f"{r['budget'] * 1000:.0f}" if r["budget"] else "-"
             flag = "  OVER" if r["over_budget"] else ""
             print(f"{r['scenario']:<42}{r['min'] * 1000:>8.1f}{r['median'] * 1000:>8.1f}"
                   f"{r['p95'] * 1000:>8.1f}{r['max'] * 1000:>8.1f}{budget:>8}{flag}")
-        print("\nhook cost above the interpreter floor = median - floor median.")
+        print("\nhook cost = median minus the matching floor row (interpreter start for Python, bare spawn for a binary).")
     return 1 if (args.check and failed) else 0
 
 

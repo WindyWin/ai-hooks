@@ -1,6 +1,8 @@
 import importlib.util
 import json
+import os
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -11,6 +13,11 @@ SCRIPT = Path(__file__).with_name("mask-secrets.py")
 spec = importlib.util.spec_from_file_location("mask_secrets", SCRIPT)
 policy = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(policy)
+
+# The tests are black-box (JSON in, JSON out), so they can run against any implementation:
+#   HOOK_CMD=rust/target/release/mask-secrets python3 -m unittest test_mask_secrets
+HOOK_CMD = shlex.split(os.environ["HOOK_CMD"]) if os.environ.get("HOOK_CMD") else [sys.executable, "-I", str(SCRIPT)]
+python_only = unittest.skipIf("HOOK_CMD" in os.environ, "tests Python internals; the Rust crate has unit tests for this")
 
 
 class SharedMaskingTests(unittest.TestCase):
@@ -28,7 +35,7 @@ class SharedMaskingTests(unittest.TestCase):
 
     def invoke(self, tool, inp, **extra):
         payload = {"hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": inp, "cwd": str(self.root), **extra}
-        result = subprocess.run([sys.executable, "-I", str(SCRIPT)], input=json.dumps(payload), text=True, capture_output=True, check=True)
+        result = subprocess.run(HOOK_CMD, input=json.dumps(payload), text=True, capture_output=True, check=True)
         self.assertEqual(result.stderr, "")
         return json.loads(result.stdout) if result.stdout else None
 
@@ -79,12 +86,14 @@ class SharedMaskingTests(unittest.TestCase):
         self.assertIsNone(self.invoke("Read", {"file_path": ".env.example"}))
         self.assertIsNone(self.invoke("Write", {"file_path": ".env"}))
 
+    @python_only
     def test_filename_rules(self):
         for path in [".env", ".env.local", "server.env", "application.properties", "APP.PROPERTIES"]:
             self.assertTrue(policy.is_target(path), path)
         for path in ["regular.txt", ".env.example", ".env.sample", ".env.template", "app.properties.dist", "app.properties.tpl"]:
             self.assertFalse(policy.is_target(path), path)
 
+    @python_only
     def test_env_multiline_quotes(self):
         for quote in ["'", '"']:
             with self.subTest(quote=quote):
@@ -93,6 +102,7 @@ class SharedMaskingTests(unittest.TestCase):
                 self.assertNotIn("FAKE_", masked)
                 self.assertIn("NEXT=****", masked)
 
+    @python_only
     def test_same_line_and_escaped_quotes(self):
         masked = policy.mask_text(".env", 'TOKEN="FAKE_1\\"FAKE_2"\n# retained comment\nNEXT=FAKE_3')
         self.assertNotIn("FAKE_", masked)
@@ -116,7 +126,7 @@ class SharedMaskingTests(unittest.TestCase):
 
     def test_malformed_and_nonmatching_inputs(self):
         for inp in ["{}", "not json"]:
-            result = subprocess.run([sys.executable, "-I", str(SCRIPT)], input=inp, text=True, capture_output=True)
+            result = subprocess.run(HOOK_CMD, input=inp, text=True, capture_output=True)
             self.assertEqual(result.returncode, 0)
             self.assertEqual(result.stdout, "")
         self.assertIsNone(self.invoke("Read", {"file_path": "missing.env"}))
@@ -142,7 +152,7 @@ class BypassRegressionTests(unittest.TestCase):
 
     def invoke(self, tool, inp, cwd=None):
         payload = {"hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": inp, "cwd": str(cwd or self.root)}
-        result = subprocess.run([sys.executable, "-I", str(SCRIPT)], input=json.dumps(payload), text=True, capture_output=True, check=True)
+        result = subprocess.run(HOOK_CMD, input=json.dumps(payload), text=True, capture_output=True, check=True)
         self.assertEqual(result.stderr, "")
         return json.loads(result.stdout) if result.stdout else None
 
@@ -272,6 +282,7 @@ class BypassRegressionTests(unittest.TestCase):
             self.blocked(self.bash(command), command)
         self.assertIsNone(self.bash("echo '# cat .env is only text' > /dev/null"))
 
+    @python_only
     def test_search_that_cannot_finish_is_denied(self):
         with mock.patch.object(policy, "WALK_MAX_ENTRIES", 0):
             message = policy.search_exposure("recursive grep", [str(self.root)], [], [], False, str(self.root), policy.Budget())
@@ -279,13 +290,13 @@ class BypassRegressionTests(unittest.TestCase):
 
     def test_fail_closed_on_internal_error(self):
         payload = {"tool_name": "Bash", "tool_input": [".env"], "cwd": str(self.root)}  # malformed: list, not dict
-        result = subprocess.run([sys.executable, "-I", str(SCRIPT)], input=json.dumps(payload), text=True, capture_output=True)
+        result = subprocess.run(HOOK_CMD, input=json.dumps(payload), text=True, capture_output=True)
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stderr, "")
         reason = json.loads(result.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
         self.assertIn("internal error", reason)
         payload["tool_input"] = ["ls"]  # same error, but no secret file mentioned: stay out of the way
-        result = subprocess.run([sys.executable, "-I", str(SCRIPT)], input=json.dumps(payload), text=True, capture_output=True)
+        result = subprocess.run(HOOK_CMD, input=json.dumps(payload), text=True, capture_output=True)
         self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
 
 

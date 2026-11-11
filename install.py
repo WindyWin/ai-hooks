@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Fast installer: register mask-secrets.py as a PreToolUse hook for Claude Code and Codex.
+"""Installer for the Python hook (the fallback; the Rust binary installs itself: `mask-secrets install`).
+
+Registers mask-secrets.py as a PreToolUse hook for Claude Code and Codex.
 
     python3 install.py                 # every agent whose config dir exists
     python3 install.py --claude        # Claude only
@@ -21,7 +23,7 @@ import time
 from pathlib import Path
 
 HOOK_SCRIPT = Path(__file__).resolve().with_name("mask-secrets.py")
-MARKER = "mask-secrets.py"
+MARKER = "mask-secrets"  # matches both the Python script and the Rust binary
 PYTHON = "python" if os.name == "nt" else "python3"  # Windows installs ship python, not python3
 EVENT = "PreToolUse"
 
