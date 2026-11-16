@@ -29,6 +29,8 @@ import tempfile
 import time
 from pathlib import Path
 
+os.environ["MASK_SECRETS_LOG"] = "off"  # benchmarking must not write to the real block / mask counters
+
 SCRIPT = Path(__file__).with_name("mask-secrets.py")
 CMD = [sys.executable, "-I", str(SCRIPT)]  # overridden by --cmd
 
@@ -62,10 +64,14 @@ def scenarios(root: Path, big: Path, clean: Path, huge: Path | None):
          {"query": "select * from t where a = 1 " * 200, "rows": [{"k": str(i)} for i in range(500)]},
          cwd, False, FAST_BUDGET),
         ("deny   Read .env", "Read", {"file_path": ".env"}, cwd, True, FAST_BUDGET),
-        ("deny   Bash cat .env", "Bash", {"command": "cat .env"}, cwd, True, FAST_BUDGET),
+        ("rewrite Bash cat .env (--cat)", "Bash", {"command": "cat .env"}, cwd, True, FAST_BUDGET),
+        ("rewrite Bash find -exec cat", "Bash", {"command": "find . -type f -exec cat {} +"}, cwd, True, FAST_BUDGET),
+        ("deny   Bash head .env regular.txt", "Bash", {"command": "head -1 .env regular.txt"}, cwd, True, FAST_BUDGET),
         ("deny   Bash obfuscated loop", "Bash",
          {"command": 'for f in app.properties; do cat "$f"; done'}, cwd, True, FAST_BUDGET),
         ("deny   Read huge .env (2000 lines)", "Read", {"file_path": "huge.env"}, cwd, True, FAST_BUDGET),
+        ("rewrite Bash git diff (check-attr)", "Bash", {"command": "git diff"}, cwd, True, FAST_BUDGET),
+        ("rewrite Bash git log -p | head", "Bash", {"command": "git log -p | head -50"}, cwd, True, FAST_BUDGET),
         ("walk   Bash grep -r (big tree)", "Bash", {"command": "grep -rn TODO ."}, str(big), True, WALK_BUDGET),
         ("walk   Grep content (big tree)", "Grep", {"path": ".", "output_mode": "content", "pattern": "x"},
          str(big), True, WALK_BUDGET),
@@ -87,7 +93,8 @@ def run_once(tool, inp, cwd) -> tuple[float, bool]:
     if r.returncode != 0 or r.stderr:
         sys.exit(f"hook failed (rc={r.returncode}): {r.stderr.strip()[:300]}")
     out = json.loads(r.stdout) if r.stdout else None
-    denied = bool(out and out["hookSpecificOutput"]["permissionDecision"] == "deny")
+    hook = out["hookSpecificOutput"] if out else {}
+    denied = hook.get("permissionDecision") == "deny" or "updatedInput" in hook  # blocked, or rewritten to print masked
     return dt, denied
 
 
@@ -117,6 +124,7 @@ def main() -> int:
         (root / "app.properties").write_text("password=FAKE_PASSWORD_123\n")
         (root / ".env.example").write_text("TOKEN=example\n")
         (root / "regular.txt").write_text("ordinary text\n")
+        subprocess.run(["git", "init", "-q"], cwd=root, capture_output=True)  # git commands are rewritten with `git check-attr`
         (root / "huge.env").write_text("".join(f"KEY_{i}=FAKE_VALUE_{i}\n" for i in range(2000)))
         build_tree(big, args.files)
         build_tree(clean, args.files, secret=False)

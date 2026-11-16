@@ -14,12 +14,60 @@ fn main() {
             }
             return;
         }
+        Some("tui") => {
+            if let Err(e) = mask_secrets::tui::run() {
+                eprintln!("mask-secrets: {e}");
+                std::process::exit(1);
+            }
+            return;
+        }
+        Some("stats") => {
+            let path = mask_secrets::stats::log_path();
+            let events = path.as_deref().map(mask_secrets::stats::read_events).unwrap_or_default();
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs());
+            print!("{}", mask_secrets::stats::report(&events, now, path.as_deref()));
+            return;
+        }
         Some("--version" | "-V") => {
             println!("mask-secrets {}", env!("CARGO_PKG_VERSION"));
             return;
         }
         Some("--help" | "-h" | "help") => {
             print!("{}", mask_secrets::install::USAGE);
+            return;
+        }
+        Some("--scrub") => {
+            // `<search> | mask-secrets --scrub [--counts]`: mask the lines of grep output that start with a secret file's path.
+            std::process::exit(mask_secrets::scrub::run(args[1..] == ["--counts"]));
+        }
+        Some("--cat") => {
+            // `mask-secrets --cat FILE...`: like cat, secret files masked.
+            std::process::exit(mask_secrets::mask::cat_files(&args[1..]));
+        }
+        Some("--mask") if args.len() == 3 && matches!(args[1].as_str(), "env" | "properties") => {
+            // git textconv driver: `mask-secrets --mask env|properties FILE` prints the masked file.
+            match mask_secrets::mask_as(&args[1], &args[2]) {
+                Some(bytes) => {
+                    let mut stdout = std::io::stdout();
+                    let _ = stdout.write_all(&bytes);
+                    let _ = stdout.flush();
+                }
+                None => std::process::exit(1),
+            }
+            return;
+        }
+        Some(path) if args.len() == 1 && !path.starts_with('-') => {
+            // `rg --pre mask-secrets FILE`: print the masked view of FILE for rg to search.
+            match mask_secrets::masked_view(path) {
+                Some(bytes) => {
+                    let mut stdout = std::io::stdout();
+                    let _ = stdout.write_all(&bytes);
+                    let _ = stdout.flush();
+                }
+                None => std::process::exit(1), // no output: rg reports the error and searches nothing
+            }
             return;
         }
         Some(other) => {
@@ -44,5 +92,6 @@ fn main() {
         let mut stdout = std::io::stdout();
         let _ = stdout.write_all(out.as_bytes());
         let _ = stdout.flush();
+        mask_secrets::stats::record(&raw, &out);
     }
 }

@@ -45,6 +45,8 @@ USAGE
   mask-secrets                      run as a hook (reads one PreToolUse JSON payload on stdin)
   mask-secrets install [options]    register this binary with Claude Code and Codex
   mask-secrets uninstall [options]  remove it again (same as install --uninstall)
+  mask-secrets tui                  interactive installer and block / mask counters
+  mask-secrets stats                print how many calls were blocked and masked
   mask-secrets --version
 
 INSTALL OPTIONS
@@ -53,6 +55,132 @@ INSTALL OPTIONS
   --uninstall   remove the hook again
   --dry-run     show what would change without writing
 ";
+
+thread_local! {
+    static CAPTURE: std::cell::RefCell<Option<Vec<String>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Progress line: printed, or collected while `capture` runs (the TUI owns the screen).
+fn say(msg: String) {
+    CAPTURE.with(|c| match c.borrow_mut().as_mut() {
+        Some(lines) => lines.push(msg),
+        None => println!("{msg}"),
+    });
+}
+
+fn capture<T>(f: impl FnOnce() -> T) -> (T, Vec<String>) {
+    CAPTURE.with(|c| *c.borrow_mut() = Some(Vec::new()));
+    let result = f();
+    let lines = CAPTURE.with(|c| c.borrow_mut().take()).unwrap_or_default();
+    (result, lines)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HookState {
+    /// No mask-secrets entry in the agent's hook file.
+    Missing,
+    /// Registered and pointing at this very binary.
+    Current,
+    /// Registered, but running something else (the Python script, an older or moved binary).
+    Other(String),
+    /// The hook file exists but cannot be read as a JSON object.
+    Unreadable(String),
+}
+
+#[derive(Clone, Debug)]
+pub struct AgentInfo {
+    pub name: &'static str,
+    pub dir: Option<PathBuf>,
+    pub dir_exists: bool,
+    pub state: HookState,
+    /// Codex only: is `[features] hooks = true` set in config.toml?
+    pub feature_on: Option<bool>,
+}
+
+fn hook_state(agent: &Agent, dir: &Path, current: &str) -> HookState {
+    let path = dir.join(agent.file);
+    let Ok(text) = fs::read_to_string(&path) else {
+        return HookState::Missing;
+    };
+    if text.trim().is_empty() {
+        return HookState::Missing;
+    }
+    let Ok(data) = serde_json::from_str::<Value>(&text) else {
+        return HookState::Unreadable(format!("{} is not valid JSON", path.display()));
+    };
+    let ours = data["hooks"][EVENT].as_array().and_then(|groups| {
+        groups.iter().find(|g| is_ours(g)).and_then(|g| {
+            g["hooks"].as_array().and_then(|hs| {
+                hs.iter()
+                    .filter_map(|h| h["command"].as_str())
+                    .find(|c| c.contains(MARKER))
+            })
+        })
+    });
+    match ours {
+        None => HookState::Missing,
+        Some(c) if c == current => HookState::Current,
+        Some(c) => HookState::Other(c.to_string()),
+    }
+}
+
+/// Where each supported agent stands: config dir found, hook registered or not.
+pub fn agents() -> Vec<AgentInfo> {
+    let current = hook_command().unwrap_or_default();
+    AGENTS
+        .iter()
+        .map(|a| {
+            let dir = config_dir(a);
+            let feature_on = (a.name == "codex").then(|| {
+                dir.as_ref()
+                    .and_then(|d| fs::read_to_string(d.join("config.toml")).ok())
+                    .is_some_and(|t| codex_feature_enabled(&t))
+            });
+            AgentInfo {
+                name: a.name,
+                dir_exists: dir.as_ref().is_some_and(|d| d.is_dir()),
+                state: dir
+                    .as_ref()
+                    .map_or(HookState::Missing, |d| hook_state(a, d, &current)),
+                dir,
+                feature_on,
+            }
+        })
+        .collect()
+}
+
+fn codex_feature_enabled(toml: &str) -> bool {
+    let section = Regex::new(r"(?m)^\[features\][ \t]*\n").unwrap();
+    let Some(m) = section.find(toml) else {
+        return false;
+    };
+    let rest = &toml[m.end()..];
+    let body_len = Regex::new(r"(?m)^\[")
+        .unwrap()
+        .find(rest)
+        .map_or(rest.len(), |n| n.start());
+    Regex::new(r"(?m)^hooks[ \t]*=[ \t]*true\b")
+        .unwrap()
+        .is_match(&rest[..body_len])
+}
+
+/// Install or remove the hook for one agent and return what was done, line by line.
+pub fn apply(name: &str, uninstall: bool, dry_run: bool) -> Result<Vec<String>, String> {
+    let agent = AGENTS
+        .iter()
+        .find(|a| a.name == name)
+        .ok_or_else(|| format!("unknown agent {name}"))?;
+    let command = hook_command()?;
+    let dir = config_dir(agent).ok_or("cannot find the home directory")?;
+    let (result, lines) = capture(|| {
+        update_hooks_json(agent, &dir, &command, uninstall, dry_run)?;
+        if agent.name == "codex" && !uninstall {
+            enable_codex_hooks_feature(&dir, dry_run)?;
+        }
+        Ok::<(), String>(())
+    });
+    result.map(|()| lines)
+}
 
 fn home() -> Option<PathBuf> {
     env::var_os("HOME")
@@ -114,11 +242,11 @@ fn write_if_changed(
     label: &str,
 ) -> Result<(), String> {
     if new == old {
-        println!("  {label}: already up to date");
+        say(format!("  {label}: already up to date"));
         return Ok(());
     }
     if dry_run {
-        println!("  {label}: would update {}", path.display());
+        say(format!("  {label}: would update {}", path.display()));
         return Ok(());
     }
     if let Some(parent) = path.parent() {
@@ -140,7 +268,7 @@ fn write_if_changed(
         );
     }
     fs::write(path, new).map_err(|e| format!("{}: {e}", path.display()))?;
-    println!("  {label}: updated {}{note}", path.display());
+    say(format!("  {label}: updated {}{note}", path.display()));
     Ok(())
 }
 
@@ -222,7 +350,7 @@ fn enable_codex_hooks_feature(dir: &Path, dry_run: bool) -> Result<(), String> {
             .unwrap()
             .is_match(body)
         {
-            println!("  codex: config.toml already has features.hooks = true");
+            say("  codex: config.toml already has features.hooks = true".into());
             return Ok(());
         }
         let hooks_line = Regex::new(r"(?m)^hooks[ \t]*=.*$").unwrap();
@@ -256,6 +384,11 @@ fn hook_command() -> Result<String, String> {
         exe = exe.replace('\\', "/");
     }
     Ok(format!("\"{exe}\""))
+}
+
+/// The command `install` would register, for display.
+pub fn hook_command_display() -> String {
+    hook_command().unwrap_or_else(|e| e)
 }
 
 pub fn run(args: &[String]) -> Result<(), String> {

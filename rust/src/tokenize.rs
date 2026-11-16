@@ -158,15 +158,89 @@ fn shlex_split(cmd: &str) -> Result<Vec<String>, ()> {
     Ok(out)
 }
 
+const LITERAL_SPECIALS: &str = ";()&|<>";
+
+fn protect(c: char) -> Option<char> {
+    LITERAL_SPECIALS
+        .chars()
+        .position(|x| x == c)
+        .and_then(|i| char::from_u32(0xE000 + i as u32))
+}
+
+fn unprotect(c: char) -> Option<char> {
+    let i = (c as u32).checked_sub(0xE000)? as usize;
+    LITERAL_SPECIALS.chars().nth(i)
+}
+
+/// Swap the shell punctuation that bash takes literally (`\;`, `\(`, `';'`, "a;b") for private characters, so the
+/// tokenizer does not mistake `find -exec ... \;` or `\( -name a \)` for a separator. Only the characters change:
+/// the quotes and every other backslash stay for the lexer.
+fn protect_literals(cmd: &str) -> String {
+    let chars: Vec<char> = cmd.chars().collect();
+    let mut out = String::with_capacity(cmd.len());
+    let mut quote: Option<char> = None;
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        match quote {
+            Some(q) => {
+                if c == q {
+                    quote = None;
+                    out.push(c);
+                } else if c == '\\' && q == '"' && i + 1 < chars.len() {
+                    out.push(c);
+                    out.push(protect(chars[i + 1]).unwrap_or(chars[i + 1]));
+                    i += 1;
+                } else {
+                    out.push(protect(c).unwrap_or(c));
+                }
+            }
+            None if c == '\'' || c == '"' => {
+                quote = Some(c);
+                out.push(c);
+            }
+            None if c == '\\' && i + 1 < chars.len() => {
+                match protect(chars[i + 1]) {
+                    Some(p) => out.push(p),
+                    None => {
+                        out.push(c);
+                        out.push(chars[i + 1]);
+                    }
+                }
+                i += 1;
+            }
+            None => out.push(c),
+        }
+        i += 1;
+    }
+    out
+}
+
+/// Back to the original characters. A token that is nothing but literal punctuation keeps a backslash (`\;`) so it
+/// is not taken for a separator any more.
+fn unprotect_token(tok: &str) -> String {
+    if !tok.chars().any(|c| unprotect(c).is_some()) {
+        return tok.to_string();
+    }
+    let text: String = tok.chars().map(|c| unprotect(c).unwrap_or(c)).collect();
+    if tok.chars().all(|c| unprotect(c).is_some()) {
+        format!("\\{text}")
+    } else {
+        text
+    }
+}
+
 /// Split a shell command into tokens; falls back to whitespace splitting on malformed quoting.
 pub fn tokenize(cmd: &str) -> Vec<String> {
     let cmd = cmd.replace('\n', " ; ");
-    shlex_split(&cmd).unwrap_or_else(|_| {
-        cmd.split(py_is_space)
+    match shlex_split(&protect_literals(&cmd)) {
+        Ok(tokens) => tokens.iter().map(|t| unprotect_token(t)).collect(),
+        Err(_) => cmd
+            .split(py_is_space)
             .filter(|s| !s.is_empty())
             .map(str::to_string)
-            .collect()
-    })
+            .collect(),
+    }
 }
 
 #[cfg(test)]
@@ -198,6 +272,22 @@ mod tests {
             t("echo $(cat .env)"),
             ["echo", "$", "(", "cat", ".env", ")"]
         );
+    }
+
+    #[test]
+    fn escaped_and_quoted_punctuation_is_a_word_not_a_separator() {
+        assert_eq!(
+            t(r"find . -exec cat {} \; -print"),
+            ["find", ".", "-exec", "cat", "{}", r"\;", "-print"]
+        );
+        assert_eq!(
+            t(r"find . \( -name a \) -exec cat {} +"),
+            ["find", ".", r"\(", "-name", "a", r"\)", "-exec", "cat", "{}", "+"]
+        );
+        assert_eq!(t("a ';' b \";\""), ["a", r"\;", "b", r"\;"]);
+        assert_eq!(t("echo 'a;b' x\\;y"), ["echo", "a;b", "x;y"]);
+        assert_eq!(t("echo \"a\\;b\""), ["echo", r"a\;b"]);
+        assert_eq!(t("a \\\\; b"), ["a", "\\", ";", "b"]);
     }
 
     #[test]
