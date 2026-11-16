@@ -4,7 +4,9 @@
 //! grep, ag and ack have no equivalent of rg's `--pre`, so their output is filtered instead. It only works for output
 //! shapes it understands; the rewrite is limited to a list of known-benign flags (see `bash::search_args_ok`).
 
-use crate::mask::{ENV_RE, MASK, PROPS_RE, is_target, mask_env_line, mask_lines, mask_properties_line, splitlines};
+use crate::mask::{
+    ENV_RE, MASK, PROPS_RE, is_target, mask_env_line, mask_lines, mask_properties_line, splitlines,
+};
 use crate::pathx::py_strip;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
@@ -14,7 +16,8 @@ use std::sync::LazyLock;
 /// Like grep: exit 1 when nothing came out, so `grep ... || echo none` keeps working.
 pub const NO_OUTPUT_STATUS: i32 = 1;
 
-static NUMBERS_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(?:[0-9]+[:\-]){1,3}").unwrap());
+static NUMBERS_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(?:[0-9]+[:\-]){1,3}").unwrap());
 
 /// Heuristic for a line out of a secret file when the file itself cannot be consulted.
 fn scrub_body(path: &str, body: &str) -> String {
@@ -35,9 +38,12 @@ fn scrub_body(path: &str, body: &str) -> String {
     }
 }
 
+/// (raw lines, masked lines) of one secret file; None when it cannot be read.
+type FileLines = Option<(Vec<String>, Vec<String>)>;
+
 #[derive(Default)]
 pub struct Scrubber {
-    files: HashMap<String, Option<(Vec<String>, Vec<String>)>>,
+    files: HashMap<String, FileLines>,
 }
 
 impl Scrubber {
@@ -126,7 +132,11 @@ impl Scrubber {
             Err(_) => {
                 let lossy = String::from_utf8_lossy(raw);
                 let out = self.scrub_line(&lossy, counts);
-                if out == lossy { raw.to_vec() } else { out.into_bytes() }
+                if out == lossy {
+                    raw.to_vec()
+                } else {
+                    out.into_bytes()
+                }
             }
         }
     }
@@ -166,25 +176,61 @@ mod tests {
     #[test]
     fn masks_lines_that_start_with_a_secret_path() {
         for (input, counts, want) in [
-            ("./.env:1:DB_PASSWORD=hunter2\n", false, "./.env:1:DB_PASSWORD=****\n"),
-            ("./a/my-app.properties:7:db.password = s3cr3t\n", false, "./a/my-app.properties:7:db.password = ****\n"),
-            ("./a/my-app.properties-8-continued value\n", false, "./a/my-app.properties-8-continued ****\n"),
-            ("./.ENV:3:export TOKEN='abc def'\n", false, "./.ENV:3:export TOKEN=****\n"),
-            ("APP.PROPERTIES:key hello world\n", false, "APP.PROPERTIES:key ****\n"),
+            (
+                "./.env:1:DB_PASSWORD=hunter2\n",
+                false,
+                "./.env:1:DB_PASSWORD=****\n",
+            ),
+            (
+                "./a/my-app.properties:7:db.password = s3cr3t\n",
+                false,
+                "./a/my-app.properties:7:db.password = ****\n",
+            ),
+            (
+                "./a/my-app.properties-8-continued value\n",
+                false,
+                "./a/my-app.properties-8-continued ****\n",
+            ),
+            (
+                "./.ENV:3:export TOKEN='abc def'\n",
+                false,
+                "./.ENV:3:export TOKEN=****\n",
+            ),
+            (
+                "APP.PROPERTIES:key hello world\n",
+                false,
+                "APP.PROPERTIES:key ****\n",
+            ),
             ("./x.env:5:12:K=v\n", false, "./x.env:5:12:K=****\n"),
             ("./x.env\0K=v\n", false, "./x.env\0K=****\n"),
             ("./x.env:3\n", true, "./x.env:3\n"),
             ("./x.env:3\n", false, "./x.env:****\n"),
             ("./x.env:# a comment\n", false, "./x.env:# a comment\n"),
             ("./x.env:EMPTY=\n", false, "./x.env:EMPTY=\n"),
-            ("./.env.example:1:TOKEN=example\n", false, "./.env.example:1:TOKEN=example\n"),
-            ("src/Main.java:12:  // see app.properties: x=y\n", false, "src/Main.java:12:  // see app.properties: x=y\n"),
+            (
+                "./.env.example:1:TOKEN=example\n",
+                false,
+                "./.env.example:1:TOKEN=example\n",
+            ),
+            (
+                "src/Main.java:12:  // see app.properties: x=y\n",
+                false,
+                "src/Main.java:12:  // see app.properties: x=y\n",
+            ),
             ("./.env\n", false, "./.env\n"),
             ("--\n", false, "--\n"),
             ("./.env:1:hunter2\r\n", false, "./.env:1:****\r\n"),
-            ("Binary file ./a.env matches\n", false, "Binary file ./a.env matches\n"),
+            (
+                "Binary file ./a.env matches\n",
+                false,
+                "Binary file ./a.env matches\n",
+            ),
             ("./a.env:1:K=v:with:colons\n", false, "./a.env:1:K=****\n"),
-            ("./a.env:99999999999999999999999:K=v\n", false, "./a.env:99999999999999999999999:K=****\n"),
+            (
+                "./a.env:99999999999999999999999:K=v\n",
+                false,
+                "./a.env:99999999999999999999999:K=****\n",
+            ),
         ] {
             assert_eq!(line(input, counts), want, "{input:?}");
         }
@@ -199,12 +245,27 @@ mod tests {
         std::fs::write(&file, "a=1\nlong=FAKE_A\\\n  FAKE_B FAKE_C\nlast=end\n").unwrap();
         let p = file.to_string_lossy();
         let mut s = Scrubber::default();
-        assert_eq!(s.scrub_line(&format!("{p}:3:  FAKE_B FAKE_C\n"), false), format!("{p}:3:****\n"));
-        assert_eq!(s.scrub_line(&format!("{p}:  FAKE_B FAKE_C\n"), false), format!("{p}:****\n"));
-        assert_eq!(s.scrub_line(&format!("{p}-3-  FAKE_B FAKE_C\n"), false), format!("{p}-3-****\n"));
-        assert_eq!(s.scrub_line(&format!("{p}:4:last=end\n"), false), format!("{p}:4:last=****\n"));
+        assert_eq!(
+            s.scrub_line(&format!("{p}:3:  FAKE_B FAKE_C\n"), false),
+            format!("{p}:3:****\n")
+        );
+        assert_eq!(
+            s.scrub_line(&format!("{p}:  FAKE_B FAKE_C\n"), false),
+            format!("{p}:****\n")
+        );
+        assert_eq!(
+            s.scrub_line(&format!("{p}-3-  FAKE_B FAKE_C\n"), false),
+            format!("{p}-3-****\n")
+        );
+        assert_eq!(
+            s.scrub_line(&format!("{p}:4:last=end\n"), false),
+            format!("{p}:4:last=****\n")
+        );
         // a line number that does not fit the text: the line is found by its text
-        assert_eq!(s.scrub_line(&format!("{p}:1:  FAKE_B FAKE_C\n"), false), format!("{p}:1:****\n"));
+        assert_eq!(
+            s.scrub_line(&format!("{p}:1:  FAKE_B FAKE_C\n"), false),
+            format!("{p}:1:****\n")
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

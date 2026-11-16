@@ -566,7 +566,8 @@ class BypassRegressionTests(unittest.TestCase):
     def test_filter_stopped_by_head_is_not_an_error(self):
         self.need("grep")
         (self.root / "many.env").write_text("".join(f"K{i}=FAKE_{i}\n" for i in range(20000)))
-        out = self.run_rewritten("grep -rn K . | head -2")
+        # --include keeps the order deterministic: grep -r lists files in directory order, which differs per filesystem
+        out = self.run_rewritten("grep -rn --include='many.*' K . | head -2")
         self.assertEqual(out.stdout, "./many.env:1:K0=****\n./many.env:2:K1=****\n")
         self.assertEqual(out.stderr, "")  # no BrokenPipeError traceback in the agent's output
 

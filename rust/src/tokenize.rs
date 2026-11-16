@@ -282,7 +282,9 @@ mod tests {
         );
         assert_eq!(
             t(r"find . \( -name a \) -exec cat {} +"),
-            ["find", ".", r"\(", "-name", "a", r"\)", "-exec", "cat", "{}", "+"]
+            [
+                "find", ".", r"\(", "-name", "a", r"\)", "-exec", "cat", "{}", "+"
+            ]
         );
         assert_eq!(t("a ';' b \";\""), ["a", r"\;", "b", r"\;"]);
         assert_eq!(t("echo 'a;b' x\\;y"), ["echo", "a;b", "x;y"]);

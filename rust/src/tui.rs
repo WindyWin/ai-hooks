@@ -8,7 +8,10 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style, Stylize},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, List, ListItem, ListState, Paragraph, Row, Sparkline, Table, Tabs, Wrap},
+    widgets::{
+        Block, Borders, Cell, List, ListItem, ListState, Paragraph, Row, Sparkline, Table, Tabs,
+        Wrap,
+    },
 };
 use std::io::IsTerminal;
 use std::path::PathBuf;
@@ -70,7 +73,11 @@ impl App {
 
     fn refresh(&mut self) {
         self.agents = install::agents();
-        self.events = self.log.as_deref().map(stats::read_events).unwrap_or_default();
+        self.events = self
+            .log
+            .as_deref()
+            .map(stats::read_events)
+            .unwrap_or_default();
     }
 
     fn say(&mut self, line: impl Into<String>) {
@@ -86,7 +93,11 @@ impl App {
     /// Install when the hook is not ours-and-current, remove when it is.
     fn toggle(&mut self, name: &'static str, uninstall: bool) {
         let verb = if uninstall { "Removing" } else { "Installing" };
-        self.say(format!("{verb} {}{}", label(name), if self.dry_run { " (dry run)" } else { "" }));
+        self.say(format!(
+            "{verb} {}{}",
+            label(name),
+            if self.dry_run { " (dry run)" } else { "" }
+        ));
         match install::apply(name, uninstall, self.dry_run) {
             Ok(lines) => lines.into_iter().for_each(|l| self.say(l)),
             Err(e) => self.say(format!("  error: {e}")),
@@ -119,7 +130,11 @@ impl App {
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => self.quit = true,
             KeyCode::Tab | KeyCode::BackTab => {
-                self.tab = if self.tab == Tab::Install { Tab::Stats } else { Tab::Install };
+                self.tab = if self.tab == Tab::Install {
+                    Tab::Stats
+                } else {
+                    Tab::Install
+                };
             }
             KeyCode::Char('1') => self.tab = Tab::Install,
             KeyCode::Char('2') => self.tab = Tab::Stats,
@@ -168,7 +183,11 @@ impl App {
             }
             KeyCode::Char('d') => {
                 self.dry_run = !self.dry_run;
-                let state = if self.dry_run { "on: nothing will be written" } else { "off" };
+                let state = if self.dry_run {
+                    "on: nothing will be written"
+                } else {
+                    "off"
+                };
                 self.say(format!("Dry run {state}."));
             }
             _ => {}
@@ -179,9 +198,13 @@ impl App {
 fn state_span(agent: &AgentInfo) -> Span<'static> {
     match &agent.state {
         HookState::Current => Span::styled("● installed", Style::new().fg(OK)),
-        HookState::Other(_) => Span::styled("◐ installed, different command", Style::new().fg(MASKED)),
+        HookState::Other(_) => {
+            Span::styled("◐ installed, different command", Style::new().fg(MASKED))
+        }
         HookState::Unreadable(_) => Span::styled("✗ config unreadable", Style::new().fg(BLOCKED)),
-        HookState::Missing if !agent.dir_exists => Span::styled("○ not found", Style::new().dark_gray()),
+        HookState::Missing if !agent.dir_exists => {
+            Span::styled("○ not found", Style::new().dark_gray())
+        }
         HookState::Missing => Span::styled("○ not installed", Style::new().fg(Color::Gray)),
     }
 }
@@ -198,7 +221,10 @@ fn draw_install(f: &mut Frame, app: &mut App, area: Rect) {
         .agents
         .iter()
         .map(|a| {
-            let dir = a.dir.as_ref().map_or(String::from("?"), |d| d.display().to_string());
+            let dir = a
+                .dir
+                .as_ref()
+                .map_or(String::from("?"), |d| d.display().to_string());
             ListItem::new(Line::from(vec![
                 Span::raw(format!("{:<13}", label(a.name))),
                 Span::raw(format!("{dir:<34}")),
@@ -217,32 +243,64 @@ fn draw_install(f: &mut Frame, app: &mut App, area: Rect) {
         let hook = install::hook_command_display();
         detail.push(Line::from(format!("Hook command:  {hook}")));
         match &a.state {
-            HookState::Other(c) => detail.push(Line::from(format!("Registered:    {c}")).fg(MASKED)),
+            HookState::Other(c) => {
+                detail.push(Line::from(format!("Registered:    {c}")).fg(MASKED))
+            }
             HookState::Unreadable(why) => detail.push(Line::from(why.clone()).fg(BLOCKED)),
             _ => {}
         }
         if a.feature_on == Some(false) && a.state == HookState::Current {
-            detail.push(Line::from("Codex ignores hooks until [features] hooks = true; re-run install.").fg(MASKED));
+            detail.push(
+                Line::from("Codex ignores hooks until [features] hooks = true; re-run install.")
+                    .fg(MASKED),
+            );
         }
         if !a.dir_exists {
-            detail.push(Line::from("Config directory does not exist yet; installing creates it.").dark_gray());
+            detail.push(
+                Line::from("Config directory does not exist yet; installing creates it.")
+                    .dark_gray(),
+            );
         }
-        let action = if a.state == HookState::Current { "remove the hook" } else { "install the hook" };
-        detail.push(Line::from(format!("Enter / space: {action}{}", if app.dry_run { "  [dry run]" } else { "" })));
+        let action = if a.state == HookState::Current {
+            "remove the hook"
+        } else {
+            "install the hook"
+        };
+        detail.push(Line::from(format!(
+            "Enter / space: {action}{}",
+            if app.dry_run { "  [dry run]" } else { "" }
+        )));
     }
     f.render_widget(
-        Paragraph::new(detail).wrap(Wrap { trim: true }).block(Block::bordered().title(" Selected ")),
+        Paragraph::new(detail)
+            .wrap(Wrap { trim: true })
+            .block(Block::bordered().title(" Selected ")),
         detail_area,
     );
 
     let height = log_area.height.saturating_sub(2) as usize;
     let tail = app.messages.len().saturating_sub(height);
-    let lines: Vec<Line> = app.messages[tail..].iter().map(|m| Line::from(m.as_str())).collect();
-    f.render_widget(Paragraph::new(lines).block(Block::bordered().title(" Log ")), log_area);
+    let lines: Vec<Line> = app.messages[tail..]
+        .iter()
+        .map(|m| Line::from(m.as_str()))
+        .collect();
+    f.render_widget(
+        Paragraph::new(lines).block(Block::bordered().title(" Log ")),
+        log_area,
+    );
 }
 
-fn count_card<'a>(title: &'a str, s: &Summary, pick: impl Fn(&stats::Counts) -> u64) -> Paragraph<'a> {
-    let row = |name: &str, n: u64| Line::from(vec![Span::raw(format!("{name:<9}")), Span::styled(n.to_string(), Style::new().bold())]);
+fn count_card<'a>(
+    title: &'a str,
+    s: &Summary,
+    pick: impl Fn(&stats::Counts) -> u64,
+) -> Paragraph<'a> {
+    let row = |name: &str, n: u64| {
+        Line::from(vec![
+            Span::raw(format!("{name:<9}")),
+            Span::styled(n.to_string(), Style::new().bold()),
+        ])
+    };
     Paragraph::new(vec![
         row("all time", pick(&s.all)),
         row("7 days", pick(&s.last_7d)),
@@ -251,7 +309,10 @@ fn count_card<'a>(title: &'a str, s: &Summary, pick: impl Fn(&stats::Counts) -> 
     .block(Block::bordered().title(title))
 }
 
-fn breakdown(title: &str, map: &std::collections::BTreeMap<String, stats::Counts>) -> Table<'static> {
+fn breakdown(
+    title: &str,
+    map: &std::collections::BTreeMap<String, stats::Counts>,
+) -> Table<'static> {
     let mut rows: Vec<_> = map.iter().collect();
     rows.sort_by(|a, b| b.1.total().cmp(&a.1.total()).then(a.0.cmp(b.0)));
     let rows = rows.into_iter().map(|(name, c)| {
@@ -261,9 +322,16 @@ fn breakdown(title: &str, map: &std::collections::BTreeMap<String, stats::Counts
             Cell::from(c.masked.to_string()).style(Style::new().fg(MASKED)),
         ])
     });
-    Table::new(rows, [Constraint::Min(8), Constraint::Length(8), Constraint::Length(8)])
-        .header(Row::new(vec!["", "blocked", "masked"]).style(Style::new().dark_gray()))
-        .block(Block::bordered().title(format!(" {title} ")))
+    Table::new(
+        rows,
+        [
+            Constraint::Min(8),
+            Constraint::Length(8),
+            Constraint::Length(8),
+        ],
+    )
+    .header(Row::new(vec!["", "blocked", "masked"]).style(Style::new().dark_gray()))
+    .block(Block::bordered().title(format!(" {title} ")))
 }
 
 fn draw_stats(f: &mut Frame, app: &App, area: Rect) {
@@ -282,7 +350,8 @@ fn draw_stats(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(count_card(" Masked ", &s, |c| c.masked).fg(MASKED), c2);
     f.render_widget(count_card(" Total ", &s, |c| c.total()), c3);
 
-    let [blocked_area, masked_area] = Layout::horizontal([Constraint::Ratio(1, 2); 2]).areas(charts);
+    let [blocked_area, masked_area] =
+        Layout::horizontal([Constraint::Ratio(1, 2); 2]).areas(charts);
     let bars = |pick: fn(&stats::Counts) -> u64| s.hourly.iter().map(pick).collect::<Vec<u64>>();
     let (blocked, masked) = (bars(|c| c.blocked), bars(|c| c.masked));
     f.render_widget(
@@ -304,16 +373,25 @@ fn draw_stats(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(breakdown("By agent", &s.by_agent), agent_area);
     f.render_widget(breakdown("By tool", &s.by_tool), tool_area);
 
-    let rows = app.events.iter().rev().take(recent.height.saturating_sub(3) as usize).map(|e| {
-        let color = if e.action == Action::Blocked { BLOCKED } else { MASKED };
-        Row::new(vec![
-            Cell::from(format!("{} ago", stats::age(e.ts, now))),
-            Cell::from(e.action.as_str()).style(Style::new().fg(color)),
-            Cell::from(e.agent.clone()),
-            Cell::from(e.tool.clone()),
-            Cell::from(e.detail.clone()),
-        ])
-    });
+    let rows = app
+        .events
+        .iter()
+        .rev()
+        .take(recent.height.saturating_sub(3) as usize)
+        .map(|e| {
+            let color = if e.action == Action::Blocked {
+                BLOCKED
+            } else {
+                MASKED
+            };
+            Row::new(vec![
+                Cell::from(format!("{} ago", stats::age(e.ts, now))),
+                Cell::from(e.action.as_str()).style(Style::new().fg(color)),
+                Cell::from(e.agent.clone()),
+                Cell::from(e.tool.clone()),
+                Cell::from(e.detail.clone()),
+            ])
+        });
     let title = match &app.log {
         Some(p) if app.events.is_empty() => format!(" Recent events (none yet) · {} ", p.display()),
         Some(p) => format!(" Recent events · {} ", p.display()),
@@ -322,23 +400,40 @@ fn draw_stats(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(
         Table::new(
             rows,
-            [Constraint::Length(9), Constraint::Length(8), Constraint::Length(8), Constraint::Length(14), Constraint::Min(10)],
+            [
+                Constraint::Length(9),
+                Constraint::Length(8),
+                Constraint::Length(8),
+                Constraint::Length(14),
+                Constraint::Min(10),
+            ],
         )
-        .header(Row::new(vec!["when", "action", "agent", "tool", "detail"]).style(Style::new().dark_gray()))
+        .header(
+            Row::new(vec!["when", "action", "agent", "tool", "detail"])
+                .style(Style::new().dark_gray()),
+        )
         .block(Block::bordered().title(title)),
         recent,
     );
 }
 
 fn draw(f: &mut Frame, app: &mut App) {
-    let [head, body, foot] =
-        Layout::vertical([Constraint::Length(3), Constraint::Min(0), Constraint::Length(1)]).areas(f.area());
+    let [head, body, foot] = Layout::vertical([
+        Constraint::Length(3),
+        Constraint::Min(0),
+        Constraint::Length(1),
+    ])
+    .areas(f.area());
     let titles = ["1 Install", "2 Stats"];
     f.render_widget(
         Tabs::new(titles)
             .select(if app.tab == Tab::Install { 0 } else { 1 })
             .highlight_style(Style::new().bold().fg(Color::Cyan))
-            .block(Block::new().borders(Borders::ALL).title(format!(" mask-secrets {} ", env!("CARGO_PKG_VERSION")))),
+            .block(
+                Block::new()
+                    .borders(Borders::ALL)
+                    .title(format!(" mask-secrets {} ", env!("CARGO_PKG_VERSION"))),
+            ),
         head,
     );
     match app.tab {
@@ -390,7 +485,11 @@ mod tests {
         terminal.draw(|f| draw(f, app)).unwrap();
         let buf = terminal.backend().buffer().clone();
         (0..buf.area.height)
-            .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol().to_string()).collect::<String>())
+            .map(|y| {
+                (0..buf.area.width)
+                    .map(|x| buf[(x, y)].symbol().to_string())
+                    .collect::<String>()
+            })
             .collect::<Vec<_>>()
             .join("\n")
     }
@@ -403,12 +502,24 @@ mod tests {
     fn both_tabs_render_and_switch() {
         let mut app = App::new();
         app.log = None;
-        app.events = vec![Event { ts: now(), agent: "claude".into(), tool: "Read".into(), action: Action::Blocked, detail: ".env".into() }];
+        app.events = vec![Event {
+            ts: now(),
+            agent: "claude".into(),
+            tool: "Read".into(),
+            action: Action::Blocked,
+            detail: ".env".into(),
+        }];
         let install_screen = screen(&mut app);
-        assert!(install_screen.contains("Claude Code") && install_screen.contains("Codex"), "{install_screen}");
+        assert!(
+            install_screen.contains("Claude Code") && install_screen.contains("Codex"),
+            "{install_screen}"
+        );
         app.on_key(key(KeyCode::Tab));
         let stats_screen = screen(&mut app);
-        assert!(stats_screen.contains("Blocked") && stats_screen.contains("Logging is off"), "{stats_screen}");
+        assert!(
+            stats_screen.contains("Blocked") && stats_screen.contains("Logging is off"),
+            "{stats_screen}"
+        );
         assert!(stats_screen.contains(".env"), "{stats_screen}");
         app.on_key(key(KeyCode::Char('q')));
         assert!(app.quit);

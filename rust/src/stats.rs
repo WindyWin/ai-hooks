@@ -67,9 +67,7 @@ pub fn log_path() -> Option<PathBuf> {
         env::var_os("XDG_STATE_HOME")
             .filter(|v| !v.is_empty())
             .map(PathBuf::from)
-            .or_else(|| {
-                env::var_os("HOME").map(|h| PathBuf::from(h).join(".local").join("state"))
-            })
+            .or_else(|| env::var_os("HOME").map(|h| PathBuf::from(h).join(".local").join("state")))
     }
     .or_else(|| env::var_os("USERPROFILE").map(PathBuf::from))?;
     Some(base.join("mask-secrets").join("events.jsonl"))
@@ -133,7 +131,12 @@ pub fn classify(raw: &str, output: &str) -> Option<Event> {
     };
     Some(Event {
         ts: now(),
-        agent: if data.get("turn_id").is_some() { "codex" } else { "claude" }.into(),
+        agent: if data.get("turn_id").is_some() {
+            "codex"
+        } else {
+            "claude"
+        }
+        .into(),
         tool: truncate(tool, 48),
         action,
         detail: truncate(&detail, 64),
@@ -261,10 +264,7 @@ pub fn age(ts: u64, now: u64) -> String {
 }
 
 fn pad(counts: Counts) -> String {
-    format!(
-        "{:>7} blocked {:>7} masked",
-        counts.blocked, counts.masked
-    )
+    format!("{:>7} blocked {:>7} masked", counts.blocked, counts.masked)
 }
 
 /// Plain-text report for `mask-secrets stats`.
@@ -316,7 +316,8 @@ mod tests {
     }
 
     fn rewrite_out(codex: bool) -> String {
-        let mut hook = json!({"hookEventName": "PreToolUse", "updatedInput": {"command": "rg --pre x y"}});
+        let mut hook =
+            json!({"hookEventName": "PreToolUse", "updatedInput": {"command": "rg --pre x y"}});
         if codex {
             hook["permissionDecision"] = json!("allow");
         }
@@ -325,16 +326,28 @@ mod tests {
 
     #[test]
     fn classifies_deny_and_rewrite_without_leaking_values() {
-        let read = json!({"tool_name": "Read", "tool_input": {"file_path": "/srv/app/.env"}}).to_string();
+        let read =
+            json!({"tool_name": "Read", "tool_input": {"file_path": "/srv/app/.env"}}).to_string();
         let e = classify(&read, &deny_out()).unwrap();
-        assert_eq!((e.action, e.agent.as_str(), e.tool.as_str(), e.detail.as_str()), (Action::Blocked, "claude", "Read", ".env"));
+        assert_eq!(
+            (
+                e.action,
+                e.agent.as_str(),
+                e.tool.as_str(),
+                e.detail.as_str()
+            ),
+            (Action::Blocked, "claude", "Read", ".env")
+        );
         assert!(!to_line(&e).contains("SECRETVALUE"));
 
         let bash = json!({"tool_name": "Bash", "turn_id": "t1",
             "tool_input": {"command": "cd /x && FOO=1 /usr/bin/rg token --hidden"}})
         .to_string();
         let e = classify(&bash, &rewrite_out(true)).unwrap();
-        assert_eq!((e.action, e.agent.as_str(), e.detail.as_str()), (Action::Masked, "codex", "rg"));
+        assert_eq!(
+            (e.action, e.agent.as_str(), e.detail.as_str()),
+            (Action::Masked, "codex", "rg")
+        );
         assert!(!to_line(&e).contains("token"), "arguments are not logged");
     }
 
@@ -359,7 +372,13 @@ mod tests {
     #[test]
     fn summary_buckets_by_window() {
         let now = 1_000_000;
-        let ev = |ago: u64, action| Event { ts: now - ago, agent: "claude".into(), tool: "Bash".into(), action, detail: String::new() };
+        let ev = |ago: u64, action| Event {
+            ts: now - ago,
+            agent: "claude".into(),
+            tool: "Bash".into(),
+            action,
+            detail: String::new(),
+        };
         let events = [
             ev(10, Action::Blocked),
             ev(2 * HOUR + 5, Action::Masked),
@@ -367,11 +386,41 @@ mod tests {
             ev(10 * 24 * HOUR, Action::Masked),
         ];
         let s = summarize(&events, now);
-        assert_eq!(s.all, Counts { blocked: 2, masked: 2 });
-        assert_eq!(s.last_7d, Counts { blocked: 2, masked: 1 });
-        assert_eq!(s.last_24h, Counts { blocked: 1, masked: 1 });
-        assert_eq!(s.hourly[23], Counts { blocked: 1, masked: 0 });
-        assert_eq!(s.hourly[21], Counts { blocked: 0, masked: 1 });
+        assert_eq!(
+            s.all,
+            Counts {
+                blocked: 2,
+                masked: 2
+            }
+        );
+        assert_eq!(
+            s.last_7d,
+            Counts {
+                blocked: 2,
+                masked: 1
+            }
+        );
+        assert_eq!(
+            s.last_24h,
+            Counts {
+                blocked: 1,
+                masked: 1
+            }
+        );
+        assert_eq!(
+            s.hourly[23],
+            Counts {
+                blocked: 1,
+                masked: 0
+            }
+        );
+        assert_eq!(
+            s.hourly[21],
+            Counts {
+                blocked: 0,
+                masked: 1
+            }
+        );
         assert_eq!(age(now - 125, now), "2m");
     }
 
@@ -379,10 +428,21 @@ mod tests {
     fn append_read_and_clear_round_trip() {
         let path = env::temp_dir().join(format!("ms-stats-{}.jsonl", std::process::id()));
         let _ = fs::remove_file(&path);
-        let e = Event { ts: 5, agent: "codex".into(), tool: "Read".into(), action: Action::Blocked, detail: ".env".into() };
+        let e = Event {
+            ts: 5,
+            agent: "codex".into(),
+            tool: "Read".into(),
+            action: Action::Blocked,
+            detail: ".env".into(),
+        };
         append(&path, &e).unwrap();
         append(&path, &e).unwrap();
-        fs::OpenOptions::new().append(true).open(&path).unwrap().write_all(b"{broken\n").unwrap();
+        fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap()
+            .write_all(b"{broken\n")
+            .unwrap();
         assert_eq!(read_events(&path), [e.clone(), e]);
         clear(&path).unwrap();
         assert!(read_events(&path).is_empty());

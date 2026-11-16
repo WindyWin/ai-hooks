@@ -23,11 +23,17 @@ fn main() {
         }
         Some("stats") => {
             let path = mask_secrets::stats::log_path();
-            let events = path.as_deref().map(mask_secrets::stats::read_events).unwrap_or_default();
+            let events = path
+                .as_deref()
+                .map(mask_secrets::stats::read_events)
+                .unwrap_or_default();
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |d| d.as_secs());
-            print!("{}", mask_secrets::stats::report(&events, now, path.as_deref()));
+            print!(
+                "{}",
+                mask_secrets::stats::report(&events, now, path.as_deref())
+            );
             return;
         }
         Some("--version" | "-V") => {

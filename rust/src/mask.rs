@@ -180,7 +180,11 @@ pub fn mask_text(path: &str, text: &str) -> String {
 /// The masked text of a file as bytes (what `rg --pre` and git's textconv print), with a final newline.
 pub fn masked_bytes(name: &str, data: &[u8]) -> Vec<u8> {
     let masked = mask_text(name, &String::from_utf8_lossy(data));
-    if masked.is_empty() { Vec::new() } else { format!("{masked}\n").into_bytes() }
+    if masked.is_empty() {
+        Vec::new()
+    } else {
+        format!("{masked}\n").into_bytes()
+    }
 }
 
 /// What `rg --pre` searches instead of FILE: the masked text of a secret file, other files unchanged.

@@ -15,8 +15,9 @@ pub mod tui;
 pub mod walk;
 
 use bash::{
-    CAT_NOTICE, GIT_MASK_NOTICE, GREP_TOOL_ADVICE, Rewrite, SCRUB_NOTICE, analyze_bash, candidates_in_word,
-    preprocessor, readonly_search_pipeline, rewrite_command, rg_notice, search_exposure,
+    CAT_NOTICE, GIT_MASK_NOTICE, GREP_TOOL_ADVICE, Rewrite, SCRUB_NOTICE, analyze_bash,
+    candidates_in_word, preprocessor, readonly_search_pipeline, rewrite_command, rg_notice,
+    search_exposure,
 };
 use mask::{MASK, is_secret_file, is_target, render};
 pub use mask::{mask_as, masked_view};
@@ -361,7 +362,10 @@ mod tests {
     }
 
     fn call_codex(tool: &str, input: Value, cwd: &std::path::Path) -> Option<String> {
-        run(&json!({"tool_name": tool, "tool_input": input, "cwd": cwd, "turn_id": "t1"}).to_string())
+        run(
+            &json!({"tool_name": tool, "tool_input": input, "cwd": cwd, "turn_id": "t1"})
+                .to_string(),
+        )
     }
 
     #[test]
@@ -378,7 +382,12 @@ mod tests {
         let v: Value = serde_json::from_str(&out).unwrap();
         let hook = &v["hookSpecificOutput"];
         assert!(hook.get("permissionDecision").is_none(), "{out}");
-        assert!(hook["additionalContext"].as_str().unwrap().contains("KEY=****"));
+        assert!(
+            hook["additionalContext"]
+                .as_str()
+                .unwrap()
+                .contains("KEY=****")
+        );
         assert_eq!(hook["updatedInput"]["description"], "x");
         assert_eq!(
             hook["updatedInput"]["command"],
@@ -386,7 +395,10 @@ mod tests {
         );
         // an include glob is harmless once the files are masked
         let out = call("Bash", json!({"command": "rg TOKEN -g '*.env'"}), &d).expect("rewritten");
-        assert!(out.contains("updatedInput") && !out.contains("deny"), "{out}");
+        assert!(
+            out.contains("updatedInput") && !out.contains("deny"),
+            "{out}"
+        );
         // nested / complex forms and a user-supplied --pre keep the block
         for cmd in [
             "bash -c 'rg TOKEN'",
@@ -411,13 +423,29 @@ mod tests {
         let rewritten = |cmd: &str| -> Option<String> {
             let out = call("Bash", json!({"command": cmd}), &d)?;
             let v: Value = serde_json::from_str(&out).unwrap();
-            v["hookSpecificOutput"]["updatedInput"]["command"].as_str().map(String::from)
+            v["hookSpecificOutput"]["updatedInput"]["command"]
+                .as_str()
+                .map(String::from)
         };
         let scrub = format!(" | {} --scrub", bash::shell_quote(&pre));
-        assert_eq!(rewritten("grep -rn TOKEN .").unwrap(), format!("grep -rn TOKEN .{scrub}"));
-        assert_eq!(rewritten("grep -rc TOKEN . | head").unwrap(), format!("grep -rc TOKEN . | {} --scrub --counts | head", bash::shell_quote(&pre)));
+        assert_eq!(
+            rewritten("grep -rn TOKEN .").unwrap(),
+            format!("grep -rn TOKEN .{scrub}")
+        );
+        assert_eq!(
+            rewritten("grep -rc TOKEN . | head").unwrap(),
+            format!(
+                "grep -rc TOKEN . | {} --scrub --counts | head",
+                bash::shell_quote(&pre)
+            )
+        );
         // output shapes the filter does not understand, and the Codex agent, keep the block
-        for cmd in ["grep -rho TOKEN .", "grep -rn --color=always x .", "ag -o x", "grep -R x ."] {
+        for cmd in [
+            "grep -rho TOKEN .",
+            "grep -rn --color=always x .",
+            "ag -o x",
+            "grep -R x .",
+        ] {
             let out = call("Bash", json!({"command": cmd}), &d).expect(cmd);
             assert!(out.contains("\"deny\""), "{cmd}: {out}");
         }
@@ -426,8 +454,20 @@ mod tests {
         // quiet searches print nothing
         assert!(call("Bash", json!({"command": "grep -rq TOKEN ."}), &d).is_none());
         // an agent-written filter only counts when it is right behind a search whose output it understands
-        assert!(call("Bash", json!({"command": format!("grep -rn x .{scrub}")}), &d).is_none());
-        let out = call("Bash", json!({"command": format!("grep -rho x .{scrub}")}), &d).expect("denied");
+        assert!(
+            call(
+                "Bash",
+                json!({"command": format!("grep -rn x .{scrub}")}),
+                &d
+            )
+            .is_none()
+        );
+        let out = call(
+            "Bash",
+            json!({"command": format!("grep -rho x .{scrub}")}),
+            &d,
+        )
+        .expect("denied");
         assert!(out.contains("\"deny\""), "{out}");
         let _ = fs::remove_dir_all(&d);
     }
@@ -474,7 +514,10 @@ mod tests {
         fs::write(&env, "# c\nTOKEN=FAKE_SECRET\nEMPTY=\n").unwrap();
         fs::write(&tpl, "TOKEN=example\n").unwrap();
         let view = masked_view(env.to_str().unwrap()).unwrap();
-        assert_eq!(String::from_utf8(view).unwrap(), "# c\nTOKEN=****\nEMPTY=\n");
+        assert_eq!(
+            String::from_utf8(view).unwrap(),
+            "# c\nTOKEN=****\nEMPTY=\n"
+        );
         let view = masked_view(tpl.to_str().unwrap()).unwrap();
         assert_eq!(String::from_utf8(view).unwrap(), "TOKEN=example\n");
         assert!(masked_view(d.join("missing.env").to_str().unwrap()).is_none());
@@ -519,7 +562,9 @@ mod tests {
     fn rewritten_to(cmd: &str, d: &std::path::Path) -> Option<String> {
         let out = call("Bash", json!({"command": cmd}), d)?;
         let v: Value = serde_json::from_str(&out).unwrap();
-        v["hookSpecificOutput"]["updatedInput"]["command"].as_str().map(String::from)
+        v["hookSpecificOutput"]["updatedInput"]["command"]
+            .as_str()
+            .map(String::from)
     }
 
     #[test]
@@ -533,14 +578,33 @@ mod tests {
             ("cat .env", format!("{hook} --cat .env | cat")),
             ("head -1 .env", format!("{hook} --cat .env | head -1")),
             ("sed -n 1p .env", format!("{hook} --cat .env | sed -n 1p")),
-            ("tail -n 2 .env 2>/dev/null", format!("{hook} --cat .env | tail -n 2 2>/dev/null")),
+            (
+                "tail -n 2 .env 2>/dev/null",
+                format!("{hook} --cat .env | tail -n 2 2>/dev/null"),
+            ),
             ("grep TOKEN .env", format!("{hook} --cat .env | grep TOKEN")),
-            ("awk '{print $1}' .env", format!("{hook} --cat .env | awk '{{print $1}}'")),
-            ("cat .env app.properties", format!("{hook} --cat .env app.properties | cat")),
-            ("cat -n .env && ls", format!("{hook} --cat .env | cat -n && ls")),
-            ("if cat .env; then ls; fi", format!("if {hook} --cat .env | cat; then ls; fi")),
+            (
+                "awk '{print $1}' .env",
+                format!("{hook} --cat .env | awk '{{print $1}}'"),
+            ),
+            (
+                "cat .env app.properties",
+                format!("{hook} --cat .env app.properties | cat"),
+            ),
+            (
+                "cat -n .env && ls",
+                format!("{hook} --cat .env | cat -n && ls"),
+            ),
+            (
+                "if cat .env; then ls; fi",
+                format!("if {hook} --cat .env | cat; then ls; fi"),
+            ),
         ] {
-            assert_eq!(rewritten_to(cmd, &d).as_deref(), Some(want.as_str()), "{cmd}");
+            assert_eq!(
+                rewritten_to(cmd, &d).as_deref(),
+                Some(want.as_str()),
+                "{cmd}"
+            );
         }
         // what cannot be fed through the masked view stays blocked
         for cmd in [
@@ -595,7 +659,10 @@ mod tests {
             format!("echo {hook} --cat; cat .env"),
         ] {
             let out = call("Bash", json!({"command": cmd}), &d).expect("not plain");
-            assert!(out.contains("updatedInput") || out.contains("\"deny\""), "{out}");
+            assert!(
+                out.contains("updatedInput") || out.contains("\"deny\""),
+                "{out}"
+            );
         }
         let _ = fs::remove_dir_all(&d);
     }
@@ -632,7 +699,11 @@ mod tests {
                 format!(r"find . -type f -execdir {hook} --cat {{}} \; 2>/dev/null"),
             ),
         ] {
-            assert_eq!(rewritten_to(cmd, &d).as_deref(), Some(want.as_str()), "{cmd}");
+            assert_eq!(
+                rewritten_to(cmd, &d).as_deref(),
+                Some(want.as_str()),
+                "{cmd}"
+            );
         }
         // shapes that cannot be guaranteed stay blocked
         for cmd in [
@@ -657,7 +728,12 @@ mod tests {
         ] {
             assert!(call("Bash", json!({"command": cmd}), &d).is_none(), "{cmd}");
         }
-        let out = call_codex("Bash", json!({"command": "find . -type f -exec cat {} +"}), &d).expect("denied");
+        let out = call_codex(
+            "Bash",
+            json!({"command": "find . -type f -exec cat {} +"}),
+            &d,
+        )
+        .expect("denied");
         assert!(out.contains("\"deny\""), "{out}");
         let _ = fs::remove_dir_all(&d);
     }

@@ -805,7 +805,9 @@ fn rg_masks_secrets(args: &[String]) -> bool {
             return false;
         }
     }
-    !pres.is_empty() && pres.iter().all(|p| *p == pre) && RG_PRE_GLOBS.iter().all(|g| globs.contains(g))
+    !pres.is_empty()
+        && pres.iter().all(|p| *p == pre)
+        && RG_PRE_GLOBS.iter().all(|g| globs.contains(g))
 }
 
 /// rg searches optionally after `cd`, piped through head/tail/wc/sort/uniq with plain flags: nothing in them can
@@ -993,7 +995,10 @@ fn ensure_git_attributes() -> Option<String> {
 fn git_mask_configs(pre: &str) -> Vec<String> {
     let mut out = vec![format!("core.attributesFile={}", git_attributes_path())];
     for (drv, kind) in GIT_DRIVERS {
-        out.push(format!("diff.{drv}.textconv={} --mask {kind}", shell_quote(pre)));
+        out.push(format!(
+            "diff.{drv}.textconv={} --mask {kind}",
+            shell_quote(pre)
+        ));
     }
     out
 }
@@ -1016,8 +1021,8 @@ fn git_sub_index(args: &[String]) -> Option<usize> {
 
 fn git_mask_opts(sub: &str) -> Option<&'static [&'static str]> {
     match sub {
-        "diff" | "show" | "log" | "reflog" | "whatchanged" | "stash" | "diff-tree" | "diff-index"
-        | "diff-files" => Some(DIFF_OPTS),
+        "diff" | "show" | "log" | "reflog" | "whatchanged" | "stash" | "diff-tree"
+        | "diff-index" | "diff-files" => Some(DIFF_OPTS),
         "grep" => Some(&["--textconv"]),
         "blame" | "annotate" => Some(&[]),
         _ => None,
@@ -1029,9 +1034,10 @@ fn git_mask_target(args: &[String]) -> Option<(usize, &'static [&'static str])> 
     let k = git_sub_index(args)?;
     let (sub, rest) = (&args[k], &args[k + 1..]);
     let opts = git_mask_opts(sub)?;
-    if rest.iter().any(|a| {
-        has(GIT_MASK_BLOCKERS, a.split('=').next().unwrap_or("")) || a.starts_with("-O")
-    }) {
+    if rest
+        .iter()
+        .any(|a| has(GIT_MASK_BLOCKERS, a.split('=').next().unwrap_or("")) || a.starts_with("-O"))
+    {
         return None;
     }
     let mut at = k;
@@ -1324,7 +1330,14 @@ fn reader_spec(head: &str) -> Option<ReaderSpec> {
             false,
             false,
         ),
-        "tac" => spec("br", "s", &["--before", "--regex"], &["--separator"], false, false),
+        "tac" => spec(
+            "br",
+            "s",
+            &["--before", "--regex"],
+            &["--separator"],
+            false,
+            false,
+        ),
         "nl" => spec("p", "bdfhilnsvw", &[], &[], false, false),
         "head" | "tail" => spec(
             "qvz",
@@ -1358,7 +1371,13 @@ fn reader_spec(head: &str) -> Option<ReaderSpec> {
             "nsz",
             "bcdf",
             &["--complement", "--only-delimited", "--zero-terminated"],
-            &["--bytes", "--characters", "--delimiter", "--fields", "--output-delimiter"],
+            &[
+                "--bytes",
+                "--characters",
+                "--delimiter",
+                "--fields",
+                "--output-delimiter",
+            ],
             false,
             false,
         ),
@@ -1373,7 +1392,14 @@ fn reader_spec(head: &str) -> Option<ReaderSpec> {
         "sed" => spec(
             "nEsrzu",
             "el",
-            &["--quiet", "--silent", "--regexp-extended", "--null-data", "--unbuffered", "--separate"],
+            &[
+                "--quiet",
+                "--silent",
+                "--regexp-extended",
+                "--null-data",
+                "--unbuffered",
+                "--separate",
+            ],
             &["--expression", "--line-length"],
             true,
             false,
@@ -1381,8 +1407,15 @@ fn reader_spec(head: &str) -> Option<ReaderSpec> {
         "awk" | "gawk" => spec("", "Fv", &[], &[], true, false),
         "grep" | "egrep" | "fgrep" => ReaderSpec {
             short: GREP_SHORT.chars().filter(|c| *c != 'r').collect(),
-            short_value: GREP_SHORT_VALUE.chars().filter(|c| !matches!(c, 'd' | 'D')).collect(),
-            long: GREP_LONG.iter().copied().filter(|l| *l != "--recursive").collect(),
+            short_value: GREP_SHORT_VALUE
+                .chars()
+                .filter(|c| !matches!(c, 'd' | 'D'))
+                .collect(),
+            long: GREP_LONG
+                .iter()
+                .copied()
+                .filter(|l| *l != "--recursive")
+                .collect(),
             long_value: GREP_LONG_VALUE
                 .iter()
                 .copied()
@@ -1479,9 +1512,9 @@ fn reader_edits(
 ) -> Option<Vec<Edit>> {
     let mut idx: Vec<usize> = Vec::new();
     let mut toks: Vec<String> = Vec::new();
-    for m in k + 1..words.len() {
-        let raw = span_text(chars, &words[m]);
-        let e = words[m].1;
+    for (m, word) in words.iter().enumerate().skip(k + 1) {
+        let raw = span_text(chars, word);
+        let e = word.1;
         let follows: String = chars[e..(e + 2).min(chars.len())].iter().collect();
         if raw == "2>/dev/null" || (raw == "2>" && follows == "&1") {
             continue;
@@ -1499,7 +1532,9 @@ fn reader_edits(
     }
     let names: Vec<&String> = ops.iter().map(|&o| &toks[o]).collect();
     if (head != "cat" && ops.len() != 1)
-        || !names.iter().all(|n| OPERAND_RE.is_match(n) && !n.starts_with('-'))
+        || !names
+            .iter()
+            .all(|n| OPERAND_RE.is_match(n) && !n.starts_with('-'))
     {
         return None;
     }
@@ -1512,7 +1547,10 @@ fn reader_edits(
     {
         return None;
     }
-    let raw_ops: Vec<String> = ops.iter().map(|&o| span_text(chars, &words[idx[o]])).collect();
+    let raw_ops: Vec<String> = ops
+        .iter()
+        .map(|&o| span_text(chars, &words[idx[o]]))
+        .collect();
     let mut edits: Vec<Edit> = vec![(
         words[k].0,
         words[k].0,
@@ -1603,16 +1641,23 @@ fn find_exposure(seg: &Segment, cwds: &[String], cwd: &str, budget: &mut Budget)
         .collect();
     let mut first = 0;
     while first < args.len()
-        && (matches!(args[first].as_str(), "-H" | "-L" | "-P") || FIND_OPT_RE.is_match(&args[first]))
+        && (matches!(args[first].as_str(), "-H" | "-L" | "-P")
+            || FIND_OPT_RE.is_match(&args[first]))
     {
         first += 1;
     }
     let mut last = first;
-    while last < args.len() && !(args[last].starts_with('-') || matches!(args[last].as_str(), "!" | r"\(")) {
+    while last < args.len()
+        && !(args[last].starts_with('-') || matches!(args[last].as_str(), "!" | r"\("))
+    {
         last += 1;
     }
     let default_root = [".".to_string()];
-    let roots: &[String] = if first < last { &args[first..last] } else { &default_root };
+    let roots: &[String] = if first < last {
+        &args[first..last]
+    } else {
+        &default_root
+    };
     let mut dirs: Vec<String> = Vec::new();
     for r in roots {
         for base in cwds {
@@ -1659,7 +1704,13 @@ fn find_exposure(seg: &Segment, cwds: &[String], cwd: &str, budget: &mut Budget)
         let rel: Vec<String> = hits
             .iter()
             .take(8)
-            .map(|p| if p.starts_with(cwd) { relpath(p, cwd) } else { p.clone() })
+            .map(|p| {
+                if p.starts_with(cwd) {
+                    relpath(p, cwd)
+                } else {
+                    p.clone()
+                }
+            })
             .collect();
         format!("{} secret file(s) such as: {}", hits.len(), rel.join(", "))
     };
@@ -1717,7 +1768,11 @@ fn find_edits(
         edits.push((
             end,
             end,
-            format!(" | {} --scrub{}", shell_quote(pre), if counts { " --counts" } else { "" }),
+            format!(
+                " | {} --scrub{}",
+                shell_quote(pre),
+                if counts { " --counts" } else { "" }
+            ),
         ));
     }
     (edits, cat, scrub)
@@ -1806,8 +1861,10 @@ pub fn rewrite_command(cmd: &str, cwd: &str, pre: &str, codex: bool) -> Option<R
                 inserts.extend(edits);
                 out.cat |= cat;
                 out.scrub |= scrub;
-            } else if matches!(head.as_str(), "git" | "grep" | "egrep" | "fgrep" | "ag" | "ack")
-                && !codex
+            } else if matches!(
+                head.as_str(),
+                "git" | "grep" | "egrep" | "fgrep" | "ag" | "ack"
+            ) && !codex
             {
                 let text: String = chars[words[0].0..words[words.len() - 1].1].iter().collect();
                 let mut own: Vec<Segment> = Vec::new();
@@ -1863,7 +1920,7 @@ pub fn rewrite_command(cmd: &str, cwd: &str, pre: &str, codex: bool) -> Option<R
     if inserts.is_empty() {
         return None;
     }
-    inserts.sort_by(|a, b| (b.0, b.1).cmp(&(a.0, a.1)));
+    inserts.sort_by_key(|a| std::cmp::Reverse((a.0, a.1)));
     let mut result = chars.clone();
     for (start, end, text) in inserts {
         result.splice(start..end, text.chars());
@@ -1904,7 +1961,9 @@ pub fn analyze_bash(cmd: &str, cwd: &str, budget: &mut Budget) -> (Vec<String>, 
         s.masked = pre.as_deref().is_some_and(|p| {
             s.args.first().map(String::as_str) == Some("--cat")
                 && lead.last().map(String::as_str) == Some(p)
-                && lead[..lead.len() - 1].iter().all(|w| has(LEADING_KEYWORDS, w))
+                && lead[..lead.len() - 1]
+                    .iter()
+                    .all(|w| has(LEADING_KEYWORDS, w))
         });
     }
 
